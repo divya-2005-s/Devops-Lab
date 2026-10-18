@@ -1,0 +1,35 @@
+#include <tunables/global>
+
+profile my-apparmor-profile flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  /usr/local/bin/python rix,
+  /usr/local/bin/python3 rix,
+  /usr/local/bin/python3.12 rix,
+  /usr/local/lib/python3.12/** mr,
+  /usr/local/bin/** r,
+  /lib/** mr,
+  /usr/lib/** mr,
+  /app/** r,
+  /tmp/ rw,
+  /tmp/** rw,
+  /dev/null rw,
+  /dev/urandom r,
+  /etc/ld.so.cache r,
+  /etc/hosts r,
+  /etc/hostname r,
+  /etc/resolv.conf r,
+  /etc/nsswitch.conf r,
+  /etc/passwd r,
+
+  deny /etc/shadow r,
+  deny /etc/gshadow r,
+  deny /etc/** w,
+  deny /var/** w,
+  deny /bin/** x,
+  deny /usr/bin/** x,
+  deny capability sys_admin,
+
+  network inet stream,
+  network inet dgram,
+}
