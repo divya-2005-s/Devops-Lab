@@ -1,0 +1,170 @@
+pipeline {
+    agent any
+
+    environment {
+        VENV_DIR = '.venv'
+        DEPLOY_DIR = 'python-app-deploy'
+        APP_PORT = '5000'
+        APP_PID_FILE = '.jenkins-flask-app.pid'
+        APP_LOG_FILE = '.jenkins-flask-app.log'
+        APP_RESPONSE_FILE = '.jenkins-flask-app-response.txt'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Build') {
+            steps {
+                sh '''
+                    set -eu
+                    python3 --version
+                    python3 -m venv "$VENV_DIR"
+                    "$VENV_DIR/bin/python" -m pip install --disable-pip-version-check -r requirements.txt
+                '''
+            }
+        }
+
+        stage('Test') {
+            steps {
+                sh '''
+                    set -eu
+                    "$VENV_DIR/bin/python" -m unittest discover -s .
+                '''
+            }
+        }
+
+        stage('Code Quality') {
+            steps {
+                sh '''
+                    set -eu
+                    "$VENV_DIR/bin/flake8" --max-line-length=88 app.py test_app.py
+                '''
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                sh '''
+                    set -eu
+                    mkdir -p "$DEPLOY_DIR"
+                    cp app.py requirements.txt "$DEPLOY_DIR/"
+                '''
+            }
+        }
+
+        stage('Run Application') {
+            steps {
+                sh '''
+                    set -eu
+                    if [ ! -f "$DEPLOY_DIR/app.py" ]; then
+                        echo "Deployed app.py was not found in $DEPLOY_DIR"
+                        exit 1
+                    fi
+                    if [ -f "$APP_PID_FILE" ]; then
+                        echo "A previous pipeline PID file exists; refusing to start another app."
+                        exit 1
+                    fi
+
+                    nohup "$WORKSPACE/$VENV_DIR/bin/python" \
+                        "$WORKSPACE/$DEPLOY_DIR/app.py" \
+                        > "$WORKSPACE/$APP_LOG_FILE" 2>&1 \
+                        < /dev/null &
+                    app_pid=$!
+                    printf '%s\\n' "$app_pid" > "$APP_PID_FILE"
+                    sleep 1
+                    if ! kill -0 "$app_pid" 2>/dev/null; then
+                        echo "Flask process exited during startup. Application log:"
+                        cat "$APP_LOG_FILE"
+                        exit 1
+                    fi
+                    echo "Started this pipeline's Flask process with PID $app_pid."
+                '''
+            }
+        }
+
+        stage('Test Application') {
+            steps {
+                sh '''
+                    set -eu
+                    if [ ! -f "$APP_PID_FILE" ]; then
+                        echo "Pipeline PID file is missing; the application may not have started."
+                        exit 1
+                    fi
+
+                    response_code=''
+                    attempt=0
+                    while [ "$attempt" -lt 10 ]; do
+                        if response_code=$(curl --silent --show-error \
+                            --max-time 5 \
+                            --output "$APP_RESPONSE_FILE" \
+                            --write-out '%{http_code}' \
+                            "http://127.0.0.1:$APP_PORT/"); then
+                            break
+                        fi
+                        attempt=$((attempt + 1))
+                        sleep 1
+                    done
+
+                    if [ "$response_code" != '200' ]; then
+                        echo "Expected HTTP 200 from the running Flask app; received '${response_code:-no response}'."
+                        echo "Application log:"
+                        cat "$APP_LOG_FILE"
+                        exit 1
+                    fi
+
+                    actual_response=$(cat "$APP_RESPONSE_FILE")
+                    expected_response='Hello, Jenkins Multi-Stage Pipeline!'
+                    if [ "$actual_response" != "$expected_response" ]; then
+                        echo "Unexpected response body: $actual_response"
+                        echo "Expected: $expected_response"
+                        exit 1
+                    fi
+                    echo "HTTP verification passed: status $response_code and exact greeting received."
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'All build, test, quality, deploy, and live HTTP verification stages passed.'
+        }
+        failure {
+            echo 'Pipeline failed. Review the failed stage and application log before retrying.'
+        }
+        always {
+            sh '''
+                set -eu
+                if [ -f "$APP_PID_FILE" ]; then
+                    app_pid=$(cat "$APP_PID_FILE")
+                    case "$app_pid" in
+                        ''|*[!0-9]*)
+                            echo "Ignoring invalid pipeline PID file."
+                            ;;
+                        *)
+                            if [ -r "/proc/$app_pid/cmdline" ]; then
+                                command_line=$(tr '\\000' ' ' < "/proc/$app_pid/cmdline")
+                                case "$command_line" in
+                                    *"$WORKSPACE/$DEPLOY_DIR/app.py"*)
+                                        kill "$app_pid" 2>/dev/null || true
+                                        echo "Stopped this pipeline's Flask process (PID $app_pid)."
+                                        ;;
+                                    *)
+                                        echo "PID $app_pid no longer identifies this pipeline's Flask app; leaving it untouched."
+                                        ;;
+                                esac
+                            else
+                                echo "Pipeline Flask process $app_pid is already stopped."
+                            fi
+                            ;;
+                    esac
+                    rm -f "$APP_PID_FILE"
+                fi
+            '''
+        }
+    }
+}

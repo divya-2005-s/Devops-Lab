@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+*.log
+*.pid
+python-app-deploy/
+.jenkins-flask-app-response.txt
