@@ -1,0 +1,35 @@
+pipeline {
+    agent any
+
+    options {
+        timestamps()
+    }
+
+    stages {
+        stage('Python checks') {
+            steps {
+                sh 'python --version'
+                sh 'python -m pip install -r requirements.txt'
+                sh 'python -m compileall -q delivery_metrics.py test_delivery_metrics.py'
+                sh 'python -m unittest -v'
+            }
+        }
+
+        stage('Build Docker image') {
+            when {
+                expression { return params.BUILD_DOCKER_IMAGE }
+            }
+            steps {
+                sh 'docker build -t exercise6-delivery-metrics:jenkins .'
+            }
+        }
+    }
+
+    parameters {
+        booleanParam(
+            name: 'BUILD_DOCKER_IMAGE',
+            defaultValue: false,
+            description: 'Build the image only when this Jenkins agent has authorized Docker access.'
+        )
+    }
+}

@@ -1,0 +1,20 @@
+groups:
+  - name: delivery-alerts
+    rules:
+      - alert: HighPendingDeliveries
+        expr: deliveries_pending > 40
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: High number of pending deliveries
+          description: Pending deliveries have exceeded 40 for at least one minute.
+
+      - alert: LongAverageDeliveryTime
+        expr: delivery_average_time_minutes > 45
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Average delivery time is too long
+          description: Average delivery time has exceeded 45 minutes for at least one minute.

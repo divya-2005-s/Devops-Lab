@@ -1,0 +1,43 @@
+services:
+  delivery-metrics:
+    build:
+      context: .
+    image: exercise6-delivery-metrics:local
+    container_name: exercise6-delivery-metrics
+    environment:
+      METRICS_HOST: 0.0.0.0
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: exercise6-prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+    depends_on:
+      - delivery-metrics
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:12.1.1
+    container_name: exercise6-grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: exercise6-admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - exercise6-grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  exercise6-grafana-data:
