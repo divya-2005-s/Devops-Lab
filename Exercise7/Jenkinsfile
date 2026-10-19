@@ -1,0 +1,117 @@
+pipeline {
+    agent any
+
+    options {
+        timestamps()
+    }
+
+    parameters {
+        string(
+            name: 'SOURCE_DIRECTORY',
+            defaultValue: '/workspace/Exercise7',
+            description: 'Path to Exercise7 mounted into Jenkins; use . when the job checks out the source.'
+        )
+    }
+
+    stages {
+        stage('Use project source') {
+            steps {
+                dir(params.SOURCE_DIRECTORY) {
+                    script {
+                        if (!fileExists('app.py') || !fileExists('test_app.py')) {
+                            error("Exercise 7 source was not found in ${params.SOURCE_DIRECTORY}")
+                        }
+                        echo "Using Exercise 7 source from ${pwd()}"
+                    }
+                }
+            }
+        }
+
+        stage('Python version and dependencies') {
+            steps {
+                dir(params.SOURCE_DIRECTORY) {
+                    script {
+                        if (isUnix()) {
+                            sh 'python3 --version'
+                            sh 'python3 -c "import sys; assert sys.version_info >= (3, 10), sys.version"'
+                            sh 'python3 -m pip --version'
+                            sh 'python3 -m pip check'
+                        } else {
+                            bat 'py -3 --version'
+                            bat 'py -3 -c "import sys; assert sys.version_info >= (3, 10), sys.version"'
+                            bat 'py -3 -m pip --version'
+                            bat 'py -3 -m pip check'
+                        }
+                        echo 'requirements.txt declares no third-party packages; the app uses Python standard-library modules.'
+                    }
+                }
+            }
+        }
+
+        stage('Python syntax validation') {
+            steps {
+                dir(params.SOURCE_DIRECTORY) {
+                    script {
+                        if (isUnix()) {
+                            sh 'python3 -m compileall -q app.py test_app.py'
+                        } else {
+                            bat 'py -3 -m compileall -q app.py test_app.py'
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Unit tests') {
+            steps {
+                dir(params.SOURCE_DIRECTORY) {
+                    script {
+                        if (isUnix()) {
+                            sh 'python3 -m unittest -v'
+                        } else {
+                            bat 'py -3 -m unittest -v'
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Docker image build (optional)') {
+            steps {
+                dir(params.SOURCE_DIRECTORY) {
+                    script {
+                        int dockerStatus
+                        if (isUnix()) {
+                            dockerStatus = sh(
+                                returnStatus: true,
+                                script: 'docker version'
+                            )
+                        } else {
+                            dockerStatus = bat(
+                                returnStatus: true,
+                                script: '@echo off\r\ndocker version >NUL 2>&1'
+                            )
+                        }
+
+                        if (dockerStatus != 0) {
+                            echo 'BLOCKED: Docker CLI or daemon is not accessible to this Jenkins agent. Python validation and tests have completed; no image was built.'
+                        } else if (isUnix()) {
+                            sh 'docker build -t exercise7-demo:ci .'
+                        } else {
+                            bat 'docker build -t exercise7-demo:ci .'
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'SUCCESS: source, Python checks, and unit tests completed. Review the Docker stage log to see whether the optional image build ran or was blocked.'
+        }
+        failure {
+            echo 'FAILURE: review the first failed stage and its console output.'
+        }
+    }
+}
